@@ -1,5 +1,13 @@
 import "./Aplicativo.css";
 import { useEffect, useRef, useState } from "react";
+import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
+
+const mensagemInicial = {
+  id: "mensagem-inicial",
+  autor: "Atendimento",
+  texto: "Olá! Você entrou na fila do atendimento por texto. Como podemos ajudar?",
+};
 
 function App() {
 
@@ -17,13 +25,14 @@ const videoRef = useRef(null);
     horario: "",
   });
   const [mensagem, setMensagem] = useState("");
-  const [mensagens, setMensagens] = useState([
-    {
-      id: 1,
-      autor: "Atendimento",
-      texto: "Olá! Você entrou na fila do atendimento por texto. Como podemos ajudar?",
-    },
-  ]);
+  const [mensagens, setMensagens] = useState([mensagemInicial]);
+  const [idConversa] = useState(() => {
+    const idSalvo = window.localStorage.getItem("islibras-conversa-id");
+    const novoId = idSalvo || crypto.randomUUID();
+
+    window.localStorage.setItem("islibras-conversa-id", novoId);
+    return novoId;
+  });
 
   useEffect(() => {
     return () => {
@@ -59,7 +68,32 @@ const videoRef = useRef(null);
       }
     }, [emAtendimento]);
 
-    function enviarMensagem(event) {
+    useEffect(() => {
+      if (!emChat) {
+        return undefined;
+      }
+
+      const mensagensRef = collection(db, "conversas", idConversa, "mensagens");
+      const mensagensQuery = query(mensagensRef, orderBy("criadoEm", "asc"));
+      const cancelarEscuta = onSnapshot(
+        mensagensQuery,
+        (snapshot) => {
+          const mensagensDoBanco = snapshot.docs.map((documento) => ({
+            id: documento.id,
+            ...documento.data(),
+          }));
+
+          setMensagens([mensagemInicial, ...mensagensDoBanco]);
+        },
+        (error) => {
+          console.error("Não foi possível carregar as mensagens:", error);
+        }
+      );
+
+      return cancelarEscuta;
+    }, [emChat, idConversa]);
+
+    async function enviarMensagem(event) {
       event.preventDefault();
       const texto = mensagem.trim();
 
@@ -67,11 +101,17 @@ const videoRef = useRef(null);
         return;
       }
 
-      setMensagens((mensagensAtuais) => [
-        ...mensagensAtuais,
-        { id: Date.now(), autor: "Você", texto },
-      ]);
-      setMensagem("");
+      try {
+        await addDoc(collection(db, "conversas", idConversa, "mensagens"), {
+          autor: "Você",
+          texto,
+          criadoEm: serverTimestamp(),
+        });
+        setMensagem("");
+      } catch (error) {
+        console.error("Não foi possível enviar a mensagem:", error);
+        alert("Não foi possível enviar a mensagem. Verifique a conexão.");
+      }
     }
 
     function atualizarAgendamento(event) {
